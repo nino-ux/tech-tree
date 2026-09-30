@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Tech Tree</title>
+    <style>
+        :root {
+            --bg: #0f1218;
+            --panel: #1a1f2b;
+            --edge: #3a4356;
+            --edge-active: #4fc3f7;
+            --locked: #2a3040;
+            --locked-stroke: #3a4356;
+            --available: #2e4a3a;
+            --available-stroke: #6ee7a0;
+            --unlocked: #2c4a6e;
+            --unlocked-stroke: #4fc3f7;
+            --text: #e6ecf5;
+            --text-dim: #8894a8;
+            --invention: #8b95a8;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            height: 100%;
+            overflow: hidden;
+            background: var(--bg);
+            font-family: "Segoe UI", Roboto, sans-serif;
+            color: var(--text);
+        }
+
+        #app {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+
+        svg.grabbing {
+            cursor: grabbing;
+        }
+
+        /* Node styling */
+        .node rect.box {
+            rx: 8;
+            ry: 8;
+            stroke-width: 2;
+            transition: fill .35s ease, stroke .35s ease, filter .35s ease;
+        }
+
+        .node.locked rect.box {
+            fill: var(--locked);
+            stroke: var(--locked-stroke);
+            opacity: .55;
+        }
+
+        .node.available rect.box {
+            fill: var(--available);
+            stroke: var(--available-stroke);
+            filter: drop-shadow(0 0 6px rgba(110, 231, 160, .35));
+        }
+
+        .node.unlocked rect.box {
+            fill: var(--unlocked);
+            stroke: var(--unlocked-stroke);
+            filter: drop-shadow(0 0 10px rgba(79, 195, 247, .55));
+        }
+
+        .node text.title {
+            font-weight: 600;
+            font-size: 14px;
+            fill: var(--text);
+        }
+
+        .node text.inv {
+            font-size: 11.5px;
+            fill: var(--invention);
+        }
+
+        .node.unlocked text.title {
+            fill: #ffffff;
+        }
+
+        .node.locked text.title {
+            fill: var(--text-dim);
+        }
+
+        /* Edges */
+        /* NEW / CHANGED: lineage-aware edge states */
+        path.edge.ancestor {
+            stroke: var(--edge-ancestor);
+            stroke-width: 3;
+            filter: drop-shadow(0 0 4px rgba(255, 183, 77, .5));
+        }
+
+        /* Non-lineage edges when a selection exists: still visible, but subdued. */
+        path.edge.faded {
+            opacity: .25;
+            stroke: var(--edge);
+            /* keep neutral gray even if it was "active" */
+            stroke-width: 1.6;
+        }
+
+        /* Optional: completely hide non-lineage edges when you want maximum focus. */
+        path.edge.hidden {
+            opacity: 0;
+        }
+
+        path.edge {
+            fill: none;
+            stroke: var(--edge);
+            stroke-width: 2;
+            transition: stroke .4s ease, stroke-width .4s ease;
+        }
+
+        path.edge.active {
+            stroke: var(--edge-active);
+            stroke-width: 2.6;
+        }
+
+        path.edge.highlight {
+            stroke: #ffd54f;
+            stroke-width: 3;
+        }
+
+        /* UI */
+        #hud {
+            position: absolute;
+            top: 14px;
+            left: 14px;
+            background: rgba(20, 26, 38, .9);
+            border: 1px solid #2a3344;
+            border-radius: 10px;
+            padding: 12px 14px;
+            font-size: 13px;
+            line-height: 1.5;
+            backdrop-filter: blur(6px);
+            max-width: 260px;
+        }
+
+        #hud h1 {
+            font-size: 15px;
+            margin: 0 0 8px 0;
+            letter-spacing: .3px;
+        }
+
+        #hud .legend {
+            display: grid;
+            grid-template-columns: 14px 1fr;
+            gap: 4px 8px;
+            margin-top: 8px;
+            color: var(--text-dim);
+        }
+
+        #hud .swatch {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-top: 2px;
+        }
+
+        #hud button {
+            margin-top: 10px;
+            width: 100%;
+            background: #2c4a6e;
+            color: #fff;
+            border: 1px solid #4fc3f7;
+            border-radius: 6px;
+            padding: 6px 10px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background .2s;
+        }
+
+        #hud button:hover {
+            background: #3a5e88;
+        }
+
+        #hud .counter {
+            margin-top: 6px;
+            color: var(--text-dim);
+            font-size: 12px;
+        }
+
+        #tooltip {
+            position: absolute;
+            pointer-events: none;
+            background: #0b1018;
+            border: 1px solid #2a3344;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+            color: var(--text);
+            opacity: 0;
+            transition: opacity .15s;
+            max-width: 240px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <svg id="tree" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+                    orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+                </marker>
+                <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#161c28" stroke-width="1" />
+                </pattern>
+            </defs>
+            <rect id="bgrect" width="100%" height="100%" fill="url(#grid)" />
+            <g id="viewport">
+                <g id="edges"></g>
+                <g id="nodes"></g>
+            </g>
+        </svg>
+
+        <div id="hud">
+            <h1>🌳 Tech Tree</h1>
+            <div>Click an <b>available</b> (green) technology to unlock it.</div>
+            <div class="legend">
+                <span class="swatch" style="background:#2e4a3a;border:1px solid #6ee7a0"></span><span>Available</span>
+                <span class="swatch" style="background:#2c4a6e;border:1px solid #4fc3f7"></span><span>Unlocked</span>
+                <span class="swatch" style="background:#2a3040;border:1px solid #3a4356"></span><span>Locked</span>
+            </div>
+            <div class="counter" id="counter"></div>
+            <button id="reset">Reset progress</button>
+        </div>
+
+        <div id="tooltip"></div>
+    </div>
+
+    <script>
+        /* ============================================================
+           1. DATA MODEL — unchanged from before
+           ============================================================ */
+        const TECH_DATA = [
+            {
+                id: "basic_masonry", technology: "Basic Masonry", prerequisites: [],
+                inventions: ["Spear", "Axe", "Scraper"]
+            },
+            {
+                id: "fire", technology: "Fire-making", prerequisites: ["basic_masonry"],
+                inventions: ["Charcoal", "Pitch", "Torch", "Hearth"]
+            },
+            {
+                id: "cooking", technology: "Cooking", prerequisites: ["fire"],
+                inventions: ["Roasting", "Boiling", "Smoking"]
+            },
+            {
+                id: "pottery", technology: "Pottery", prerequisites: ["fire"],
+                inventions: ["Terracotta", "China", "Brick", "Kiln"]
+            },
+            {
+                id: "metallurgy", technology: "Metallurgy", prerequisites: ["fire"],
+                inventions: ["Copper", "Bronze", "Iron", "Forge"]
+            },
+            {
+                id: "hunting", technology: "Hunting & Gathering", prerequisites: ["basic_masonry"],
+                inventions: ["Seeds", "Leather", "Bow", "Snare"]
+            },
+            {
+                id: "agriculture", technology: "Agriculture", prerequisites: ["hunting"],
+                inventions: ["Plow", "Crop Rotation", "Irrigation"]
+            },
+            {
+                id: "animal_husbandry", technology: "Animal Husbandry", prerequisites: ["hunting"],
+                inventions: ["Domestication", "Wool", "Milk"]
+            },
+            {
+                id: "textile", technology: "Textile", prerequisites: ["agriculture", "animal_husbandry"],
+                inventions: ["Clothes", "Loom", "Dye"]
+            },
+            {
+                id: "medicine", technology: "Herbal Medicine", prerequisites: ["hunting", "cooking"],
+                inventions: ["Bandage", "Poultice", "Anesthesia"]
+            },
+            {
+                id: "writing", technology: "Writing", prerequisites: ["pottery", "agriculture"],
+                inventions: ["Clay Tablet", "Papyrus", "Ink", "Alphabet"]
+            },
+            {
+                id: "mathematics", technology: "Mathematics", prerequisites: ["writing"],
+                inventions: ["Numbers", "Geometry", "Abacus"]
+            },
+            {
+                id: "wheel", technology: "The Wheel", prerequisites: ["metallurgy", "basic_masonry"],
+                inventions: ["Axle", "Cart", "Pulley"]
+            },
+            {
+                id: "engineering", technology: "Engineering", prerequisites: ["wheel", "mathematics"],
+                inventions: ["Lever", "Crane", "Arch", "Aqueduct"]
+            },
+            {
+                id: "architecture", technology: "Architecture", prerequisites: ["basic_masonry", "engineering"],
+                inventions: ["Column", "Dome", "Concrete"]
+            },
+            {
+                id: "shipbuilding", technology: "Shipbuilding", prerequisites: ["wheel", "textile"],
+                inventions: ["Raft", "Sail", "Keel", "Anchor"]
+            },
+            {
+                id: "trade", technology: "Trade", prerequisites: ["writing", "shipbuilding"],
+                inventions: ["Currency", "Market", "Contract"]
+            },
+            {
+                id: "astronomy", technology: "Astronomy", prerequisites: ["mathematics"],
+                inventions: ["Calendar", "Sundial", "Star Chart"]
+            },
+            {
+                id: "navigation", technology: "Navigation", prerequisites: ["astronomy", "shipbuilding"],
+                inventions: ["Compass", "Astrolabe", "Map"]
+            }
+        ];
+
+        /* ============================================================
+           2. LAYOUT ENGINE — unchanged
+           ============================================================ */
+        const NODE_W = 190;
+        const NODE_H_BASE = 46;
+        const INV_LINE_H = 16;
+        const PAD = 12;
+        const GAP_X = 90;
+        const GAP_Y = 26;
+        const MARGIN = 60;
+
+        function nodeHeight(tech) {
+            return NODE_H_BASE + tech.inventions.length * INV_LINE_H + PAD;
+        }
+
+        function buildGraph(data) {
+            const byId = new Map();
+            const children = new Map();
+            data.forEach(t => { byId.set(t.id, { ...t }); children.set(t.id, []); });
+
+            data.forEach(t => {
+                t.prerequisites.forEach(p => {
+                    if (!byId.has(p)) throw new Error(`Unknown prerequisite "${p}"`);
+                    children.get(p).push(t.id);
+                });
+            });
+
+            const color = new Map([...byId.keys()].map(k => [k, 0]));
+            const stack = [];
+            function dfs(u) {
+                color.set(u, 1); stack.push(u);
+                for (const p of byId.get(u).prerequisites) {
+                    if (color.get(p) === 1) {
+                        const cyc = stack.slice(stack.indexOf(p)).concat(p).join(" → ");
+                        throw new Error("Cycle: " + cyc);
+                    }
+                    if (color.get(p) === 0) dfs(p);
+                }
+                color.set(u, 2); stack.pop();
+            }
+            for (const id of byId.keys()) if (color.get(id) === 0) dfs(id);
+
+            const layer = new Map();
+            const indeg = new Map([...byId.keys()].map(k => [k, byId.get(k).prerequisites.length]));
+            const q = [...byId.keys()].filter(k => indeg.get(k) === 0);
+            const topo = [];
+            while (q.length) {
+                const u = q.shift(); topo.push(u);
+                for (const v of children.get(u)) {
+                    indeg.set(v, indeg.get(v) - 1);
+                    if (indeg.get(v) === 0) q.push(v);
+                }
+            }
+            for (const id of topo) {
+                const t = byId.get(id);
+                layer.set(id, t.prerequisites.length
+                    ? 1 + Math.max(...t.prerequisites.map(p => layer.get(p)))
+                    : 0);
+            }
+
+            const maxLayer = Math.max(...layer.values());
+            const layers = Array.from({ length: maxLayer + 1 }, () => []);
+            for (const id of topo) layers[layer.get(id)].push(id);
+
+            const pos = new Map();
+            layers.forEach(L => L.forEach((id, i) => pos.set(id, i)));
+            const bary = (id, dir) => {
+                const neigh = dir > 0 ? byId.get(id).prerequisites : children.get(id);
+                if (!neigh.length) return pos.get(id);
+                return neigh.reduce((s, n) => s + pos.get(n), 0) / neigh.length;
+            };
+            for (let it = 0; it < 4; it++) {
+                for (let L = 1; L <= maxLayer; L++) {
+                    layers[L].sort((a, b) => bary(a, +1) - bary(b, +1));
+                    layers[L].forEach((id, i) => pos.set(id, i));
+                }
+                for (let L = maxLayer - 1; L >= 0; L--) {
+                    layers[L].sort((a, b) => bary(a, -1) - bary(b, -1));
+                    layers[L].forEach((id, i) => pos.set(id, i));
+                }
+            }
+
+            const colHeights = layers.map(L =>
+                L.reduce((s, id) => s + nodeHeight(byId.get(id)), 0) + Math.max(0, L.length - 1) * GAP_Y
+            );
+            const maxColH = Math.max(...colHeights);
+
+            const coords = new Map();
+            layers.forEach((L, li) => {
+                const x = MARGIN + li * (NODE_W + GAP_X);
+                const y0 = MARGIN + (maxColH - colHeights[li]) / 2;
+                let y = y0;
+                L.forEach(id => {
+                    const h = nodeHeight(byId.get(id));
+                    coords.set(id, { x, y, w: NODE_W, h });
+                    y += h + GAP_Y;
+                });
+            });
+
+            const totalW = MARGIN * 2 + layers.length * NODE_W + (layers.length - 1) * GAP_X;
+            const totalH = MARGIN * 2 + maxColH;
+
+            return { byId, children, layer, layers, coords, totalW, totalH };
+        }
+
+        /* ============================================================
+           3. STATE
+           ============================================================ */
+        const state = {
+            unlocked: new Set(),
+            selected: null,          // NEW: id of the node whose lineage is highlighted
+            graph: null
+        };
+
+        function isAvailable(id) {
+            if (state.unlocked.has(id)) return false;
+            const t = state.graph.byId.get(id);
+            return t.prerequisites.every(p => state.unlocked.has(p));
+        }
+
+        function techStatus(id) {
+            if (state.unlocked.has(id)) return "unlocked";
+            if (isAvailable(id)) return "available";
+            return "locked";
+        }
+
+        /* NEW: collect the transitive ancestor set of an id (not including itself). */
+        function ancestorsOf(id) {
+            const seen = new Set();
+            const stack = [...state.graph.byId.get(id).prerequisites];
+            while (stack.length) {
+                const u = stack.pop();
+                if (seen.has(u)) continue;
+                seen.add(u);
+                for (const p of state.graph.byId.get(u).prerequisites) stack.push(p);
+            }
+            return seen;
+        }
+
+        /* ============================================================
+           4. RENDERING
+           ============================================================ */
+        const svg = document.getElementById("tree");
+        const viewport = document.getElementById("viewport");
+        const gEdges = document.getElementById("edges");
+        const gNodes = document.getElementById("nodes");
+        const tooltip = document.getElementById("tooltip");
+        const counter = document.getElementById("counter");
+
+        function el(tag, attrs = {}, parent = null) {
+            const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+            for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+            if (parent) parent.appendChild(e);
+            return e;
+        }
+        function svgText(str) {
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+        function elbowPath(a, b) {
+            const sx = a.x + a.w;
+            const sy = a.y + a.h / 2;
+            const ex = b.x;
+            const ey = b.y + b.h / 2;
+            const mx = (sx + ex) / 2;
+            return `M ${sx} ${sy} H ${mx} V ${ey} H ${ex}`;
+        }
+
+        function render() {
+            gEdges.innerHTML = "";
+            gNodes.innerHTML = "";
+
+            const { byId, coords } = state.graph;
+
+            // Compute lineage sets once, up front
+            const sel = state.selected;
+            const lineage = sel ? ancestorsOf(sel) : null;    // Set of ancestor ids
+            const inLineage = id => lineage && (lineage.has(id) || id === sel);
+
+            // ----- Edges -----
+            for (const t of byId.values()) {
+                for (const p of t.prerequisites) {
+                    const pa = coords.get(p);
+                    const ca = coords.get(t.id);
+                    const path = el("path", {
+                        d: elbowPath(pa, ca),
+                        class: "edge",
+                        "data-from": p,
+                        "data-to": t.id
+                    }, gEdges);
+
+                    // Baseline active state (both endpoints unlocked)
+                    if (state.unlocked.has(p) && state.unlocked.has(t.id)) {
+                        path.classList.add("active");
+                    }
+
+                    // Lineage overlay: only when something is selected
+                    if (lineage) {
+                        const targetIn = (t.id === sel) || lineage.has(t.id);
+                        const sourceIn = lineage.has(p);
+
+                        if (targetIn && sourceIn) {
+                            path.classList.add("ancestor");     // full amber, on top visually
+                        } else {
+                            path.classList.add("faded");        // every other edge, including active ones
+                        }
+                    }
+                }
+            }
+
+            // ----- Nodes -----
+            for (const t of byId.values()) {
+                const { x, y, w, h } = coords.get(t.id);
+                const status = techStatus(t.id);
+
+                const g = el("g", {
+                    class: `node ${status}`, "data-id": t.id,
+                    transform: `translate(${x}, ${y})`
+                }, gNodes);
+
+                // Lineage classes
+                if (lineage) {
+                    if (t.id === sel) {
+                        g.classList.add("selected");
+                    } else if (lineage.has(t.id)) {
+                        g.classList.add("ancestor");
+                    } else {
+                        g.classList.add("dimmed");
+                    }
+                }
+
+                el("rect", { x: 0, y: 0, width: w, height: h, class: "box" }, g);
+
+                const title = el("text", { x: 10, y: 22, class: "title" }, g);
+                title.textContent = t.technology;
+
+                t.inventions.forEach((inv, i) => {
+                    const t2 = el("text", { x: 10, y: NODE_H_BASE + i * INV_LINE_H, class: "inv" }, g);
+                    t2.textContent = "• " + inv;
+                });
+
+                g.addEventListener("click", e => { e.stopPropagation(); onNodeClick(t.id); });
+                g.addEventListener("mouseenter", e => showTooltip(e, t, status));
+                g.addEventListener("mousemove", e => moveTooltip(e));
+                g.addEventListener("mouseleave", hideTooltip);
+            }
+
+            counter.textContent = `${state.unlocked.size} / ${byId.size} unlocked`;
+        }
+
+        /* ============================================================
+           5. INTERACTIONS
+           ============================================================ */
+        function onNodeClick(id) {
+            const status = techStatus(id);
+
+            if (status === "available") {
+                unlockTech(id);
+                return;
+            }
+            if (status === "unlocked") {
+                // Toggle selection of lineage
+                state.selected = (state.selected === id) ? null : id;
+                render();
+                return;
+            }
+            // Locked: ignore
+        }
+
+        function unlockTech(id) {
+            state.unlocked.add(id);
+
+            document.querySelectorAll(`path.edge[data-to="${id}"]`).forEach(p => {
+                p.classList.add("active");
+                p.animate(
+                    [{ strokeWidth: 2 }, { strokeWidth: 5 }, { strokeWidth: 2.6 }],
+                    { duration: 500, easing: "ease-out" }
+                );
+            });
+
+            const g = gNodes.querySelector(`g.node[data-id="${id}"]`);
+            if (g) {
+                g.classList.remove("available");
+                g.classList.add("unlocked");
+                g.animate(
+                    [{ transform: g.getAttribute("transform") + " scale(1)" },
+                    { transform: g.getAttribute("transform") + " scale(1.08)" },
+                    { transform: g.getAttribute("transform") + " scale(1)" }],
+                    { duration: 380, easing: "ease-out" }
+                );
+            }
+            setTimeout(render, 60);
+        }
+
+        function showTooltip(ev, tech, status) {
+            const n = tech.prerequisites.length
+                ? tech.prerequisites.map(p => state.graph.byId.get(p).technology).join(", ")
+                : "— none —";
+            const label = status === "unlocked" ? "✔ Unlocked"
+                : status === "available" ? "▶ Available"
+                    : "🔒 Locked";
+            const isSel = state.selected === tech.id;
+            const selHint = status === "unlocked"
+                ? `<br><span style="color:#8894a8">Click:</span> ${isSel ? "clear lineage" : "show lineage"}`
+                : "";
+            tooltip.innerHTML = `<b>${svgText(tech.technology)}</b><br>
+    <span style="color:#8894a8">Status:</span> ${label}<br>
+    <span style="color:#8894a8">Requires:</span> ${svgText(n)}${selHint}`;
+            tooltip.style.opacity = 1;
+            moveTooltip(ev);
+        }
+        function moveTooltip(ev) {
+            const r = svg.getBoundingClientRect();
+            tooltip.style.left = (ev.clientX - r.left + 14) + "px";
+            tooltip.style.top = (ev.clientY - r.top + 14) + "px";
+        }
+        function hideTooltip() { tooltip.style.opacity = 0; }
+
+        /* Clear selection when clicking empty space */
+        svg.addEventListener("click", e => {
+            if (e.target.closest(".node")) return;
+            if (state.selected !== null) {
+                state.selected = null;
+                render();
+            }
+        });
+
+        /* ============================================================
+           6. PAN & ZOOM — unchanged
+           ============================================================ */
+        let view = { x: 0, y: 0, scale: 1 };
+        let dragging = false;
+        let dragStart = { x: 0, y: 0, vx: 0, vy: 0, moved: false };
+
+        function applyView() {
+            viewport.setAttribute("transform",
+                `translate(${view.x}, ${view.y}) scale(${view.scale})`);
+        }
+
+        svg.addEventListener("mousedown", e => {
+            if (e.target.closest(".node")) return;
+            dragging = true; dragStart.moved = false;
+            svg.classList.add("grabbing");
+            dragStart.x = e.clientX; dragStart.y = e.clientY;
+            dragStart.vx = view.x; dragStart.vy = view.y;
+        });
+        window.addEventListener("mousemove", e => {
+            if (!dragging) return;
+            const dx = e.clientX - dragStart.x;
+            const dy = e.clientY - dragStart.y;
+            if (Math.abs(dx) + Math.abs(dy) > 3) dragStart.moved = true;
+            view.x = dragStart.vx + dx;
+            view.y = dragStart.vy + dy;
+            applyView();
+        });
+        window.addEventListener("mouseup", () => {
+            dragging = false; svg.classList.remove("grabbing");
+        });
+        svg.addEventListener("wheel", e => {
+            e.preventDefault();
+            const factor = e.deltaY < 0 ? 1.1 : 0.9;
+            const rect = svg.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            const wx = (mx - view.x) / view.scale;
+            const wy = (my - view.y) / view.scale;
+            view.scale = Math.max(0.3, Math.min(2.5, view.scale * factor));
+            view.x = mx - wx * view.scale;
+            view.y = my - wy * view.scale;
+            applyView();
+        }, { passive: false });
+
+        /* ============================================================
+           7. BOOT
+           ============================================================ */
+        function boot() {
+            state.graph = buildGraph(TECH_DATA);
+            const r = svg.getBoundingClientRect();
+            view.x = Math.max(0, (r.width - state.graph.totalW * 0.9) / 2);
+            view.y = Math.max(0, (r.height - state.graph.totalH * 0.9) / 2);
+            view.scale = Math.min(1, Math.min(
+                (r.width - 40) / state.graph.totalW,
+                (r.height - 40) / state.graph.totalH
+            ));
+            applyView();
+            render();
+        }
+
+        document.getElementById("reset").addEventListener("click", () => {
+            state.unlocked.clear();
+            state.selected = null;
+            render();
+        });
+
+        boot();
+    </script>
+</body>
+
+</html>
